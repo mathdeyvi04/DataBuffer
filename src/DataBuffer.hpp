@@ -4,7 +4,6 @@
 #include <fstream>
 #include <memory>
 #include <algorithm>
-#include <cstdint>
 #include <stdexcept>
 
 #ifdef ENABLE_BINARY_LOOKTABLE
@@ -35,7 +34,7 @@ private:
         /**
          * @brief Tamanho máximo de uma janela em Bytes
          */
-        size_t max_window_size = 1;
+        size_t max_window_size = 2;
 
         /**
          * @brief Quantidade de janelas de bytes necessárias para cobrir o arquivo de forma completa.
@@ -55,13 +54,67 @@ private:
         /**
          * @brief Caso seja necessário o uso de janelas, precisaremos do local onde pegar as próximas.
          */
-         std::string filepath = "";
+        std::string filepath = "";
     };
 
     /**
      * @brief Entidade ByteWindow responsável por essa instância.
      */
     ByteWindow __bw;
+
+    /**
+     * @brief Atualiza o buffer com a próxima janela de dados do arquivo.
+     * @details
+     * Avança para a próxima janela, lê os dados do arquivo e retorna indicador
+     * de continuidade.
+     * @return true  Se ainda há janelas para ler (próxima chamada terá dados).
+     * @return false Se chegou ao fim do arquivo (última janela processada).
+     * @note Quando retorna false, o buffer volta para a primeira janela (wrap).
+     * @note O tamanho da última janela pode ser menor que max_window_size.
+     */
+    bool __update_window(){
+
+        bool will_be_retorned = true;
+
+        if(this->__bw.current_window == this->__bw.window_count){
+
+            /* Caso haja apenas uma janela desde o início */
+            if(this->__bw.window_count == 1){
+                return false;
+            }
+
+            /* Demonstração de Como Modularidade é Insana */
+            this->__bw.current_window = 0;
+            will_be_retorned = false;
+        }
+
+        std::ifstream file(
+            this->__bw.filepath,
+            std::ios::binary
+        );
+        file.seekg(
+            this->__bw.current_window * this->__bw.max_window_size,
+            std::ios::beg
+        );
+
+        if(!file.is_open()){
+            throw std::runtime_error("Erro: Falha ao abrir o arquivo especificado durante atualização da janela de bytes.");
+        }
+
+        this->__bw.current_window_bytes = std::min(
+                                                  this->__tfs_bytes - this->__bw.current_window * this->__bw.max_window_size,
+                                                  this->__bw.max_window_size
+                                                  );
+        file.read(
+            reinterpret_cast<char*>(this->__data.get()),
+            this->__bw.current_window_bytes
+        );
+        this->__bw.current_window++;
+
+        file.close();
+        return will_be_retorned;
+    }
+
 
     /**
      * @brief Smart Pointer para armazenarmos os bytes.
@@ -113,9 +166,7 @@ public:
             std::ios::binary | std::ios::ate
         );
 
-        if(
-            !file.is_open()
-        ){
+        if(!file.is_open()){
             throw std::runtime_error("Erro: Falha ao abrir o arquivo especificado.");
         }
 
@@ -183,7 +234,18 @@ public:
      * Pode ser aprimorada utilizando-se um buffer std::string para reduzir chamadas
      * de os.write e printar diversos bytes por vez.
      */
-    void dump_bits(std::ostream& os, bool only_this_window = true) {
+
+    /**
+     * @brief Exibe o buffer em formato binário no stream.
+     * @details
+     * Pode ser aprimorada utilizando-se um buffer std::string para reduzir chamadas
+     * de os.write e printar diversos bytes por vez.
+     * @tparam only_this_window Se true, mostra apenas a janela atual.
+     *                          Se false, percorre todas as janelas automaticamente.
+     * @param os Stream de saída (ex: std::cout).
+     */
+    template<bool only_this_window>
+    void dump_bits(std::ostream& os) {
 
         const std::byte* ptr = this->__data.get();
         for(size_t i = 0; i < this->__bw.current_window_bytes; ++i){
@@ -196,6 +258,17 @@ public:
                 8
             );
 
+            if constexpr(!only_this_window){
+                if((i + 1) == this->__bw.current_window_bytes){
+                    if(this->__update_window()){
+                        /* Pois ao final deste, ainda será somado uma unidade. */
+                        i = -1;
+                    }
+                    else{
+                        return;
+                    }
+                }
+            }
         }
     }
 
