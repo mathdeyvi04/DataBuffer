@@ -3,10 +3,13 @@
 #include <iostream>
 #include <fstream>
 #include <memory>
+#include <algorithm>
 #include <cstdint>
-
 #include <stdexcept>
 
+#ifdef ENABLE_BINARY_LOOKTABLE
+#include <array>
+#endif
 
 class DataBuffer {
 private:
@@ -21,6 +24,7 @@ private:
      */
     size_t __tfs_bits = 0;
 
+    friend struct ByteWindow;
     /**
      * @brief Struct responsável por gerenciar as janela de bytes do arquivo
      * @details
@@ -31,12 +35,22 @@ private:
         /**
          * @brief Tamanho máximo de uma janela em Bytes
          */
-        size_t max_window_size = 5;
+        size_t max_window_size = 1;
 
         /**
          * @brief Quantidade de janelas de bytes necessárias para cobrir o arquivo de forma completa.
          */
         size_t window_count = 0;
+
+        /**
+         * @brief Quantidade de Bytes Utilizada Na Janela
+         */
+        size_t current_window_bytes = 0;
+
+        /**
+         * @brief Número da Janela Atual, é fato que sempre começaremos na primeira
+         */
+        size_t current_window = 1;
 
         /**
          * @brief Caso seja necessário o uso de janelas, precisaremos do local onde pegar as próximas.
@@ -53,6 +67,30 @@ private:
      * @brief Smart Pointer para armazenarmos os bytes.
      */
     std::unique_ptr<std::byte[]> __data;
+
+#ifdef ENABLE_BINARY_LOOKTABLE
+    /**
+     * @brief Lookup table para conversão byte -> string binária (8 bits)
+     * @details
+     * Antes era necessário que calculassemos o valor de cada bit para cada byte
+     * de um arquivo. Agora poderemos ver cada byte de forma individual enquanto
+     * podemos ver os bits.
+     *
+     * Em teoria, essa função pode ser aprimorada conforme aumentarmos a quantidade
+     * de bytes que podem ser traduzidos de uma vez.
+     */
+    static constexpr std::array<std::array<char, 8>, 256> byte2binary =
+        []() constexpr {
+
+            std::array<std::array<char, 8>, 256> table{};
+            for(size_t i = 0;  i < 256; ++i){
+                for(int j = 7; j >= 0; --j){
+                    table[i][7 - j] = ((i >> j) & 1) ? '1' : '0';
+                }
+            }
+            return table;
+        }();
+#endif
 
 public:
     /**
@@ -85,11 +123,12 @@ public:
         this->__tfs_bytes = file.tellg();
         this->__tfs_bits = this->__tfs_bytes * 8;
         this->__bw.window_count = 1 + this->__tfs_bytes / this->__bw.max_window_size;
+        this->__bw.current_window_bytes = std::min(this->__tfs_bytes, this->__bw.max_window_size);
 
         /* Alocar na RAM os bytes do arquivo */
         this->__data = std::make_unique<std::byte[]>(
                                                 /* Mais comum será estar dentro da Janela Máxima*/
-                                                this->__bw.window_count == 1 ? this->__tfs_bytes : this->__bw.max_window_size
+                                                this->__bw.current_window_bytes
                                                 );
 
         /* Mover o ponteiro de volta ao início do arquivo, independente do tamanho deste. */
@@ -102,7 +141,7 @@ public:
             Carregar o arquivo inteiro na RAM, caso seja menor que o tamanho máximo da janela.
             Caso contrário, carrega apenas uma parte.
              */
-            this->__bw.window_count == 1 ? this->__tfs_bytes : this->__bw.max_window_size
+            this->__bw.current_window_bytes
         );
         if(this->__bw.window_count > 1){
             /* Apesar de ineficiente, isso tudo será executado apenas uma vez. */
@@ -111,6 +150,55 @@ public:
         file.close();
     }
 
+    /**
+     * @brief Construtor de cópia da classe DataBuffer.
+     * @details
+     * Realiza cópia profunda (deep copy) dos dados do buffer.
+     * @param other Buffer fonte a ser copiado.
+     */
+    DataBuffer(const DataBuffer& other){
 
+        this->__tfs_bytes = other.__tfs_bytes;
+        this->__tfs_bits  = other.__tfs_bits;
+        this->__bw = other.__bw;
+
+        this->__data = std::make_unique<std::byte[]>(
+                                                    this->__bw.current_window_bytes
+                                                    );
+
+        std::copy(
+            other.__data.get(),
+            other.__data.get() + other.__bw.current_window_bytes,
+            this->__data.get()
+        );
+    }
+
+#ifdef ENABLE_BINARY_LOOKTABLE
+    /**
+     * @brief Exibe o buffer em formato binário no stream fornecido.
+     * @param os Stream de saída (ex: std::cout).
+     * @param only_this_window Mostrará os bits da janela atual caso verdadeiro,
+     * caso contrário, percorrerá toda a estrutura a fim de apresentar todos os bits. Default: verdadeiro.
+     *
+     * Pode ser aprimorada utilizando-se um buffer std::string para reduzir chamadas
+     * de os.write e printar diversos bytes por vez.
+     */
+    void dump_bits(std::ostream& os, bool only_this_window = true) {
+
+        const std::byte* ptr = this->__data.get();
+        for(size_t i = 0; i < this->__bw.current_window_bytes; ++i){
+
+            /* Printar 1 byte por vez para melhorar legibilidade da função */
+            os.write(
+                DataBuffer::byte2binary[
+                    std::to_integer<unsigned char>(ptr[i])
+                ].data(),
+                8
+            );
+
+        }
+    }
+
+#endif
 
 };
