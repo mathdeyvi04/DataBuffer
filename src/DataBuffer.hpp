@@ -33,8 +33,9 @@ private:
     struct ByteWindow {
         /**
          * @brief Tamanho máximo de uma janela em Bytes
+         * @default 2 MB per window
          */
-        size_t max_window_size = 2;
+        size_t max_window_size = 1 * 1024 * 1024;
 
         /**
          * @brief Quantidade de janelas de bytes necessárias para cobrir o arquivo de forma completa.
@@ -114,7 +115,6 @@ private:
         file.close();
         return will_be_retorned;
     }
-
 
     /**
      * @brief Smart Pointer para armazenarmos os bytes.
@@ -224,16 +224,36 @@ public:
         );
     }
 
-#ifdef ENABLE_BINARY_LOOKTABLE
     /**
-     * @brief Exibe o buffer em formato binário no stream fornecido.
-     * @param os Stream de saída (ex: std::cout).
-     * @param only_this_window Mostrará os bits da janela atual caso verdadeiro,
-     * caso contrário, percorrerá toda a estrutura a fim de apresentar todos os bits. Default: verdadeiro.
-     *
-     * Pode ser aprimorada utilizando-se um buffer std::string para reduzir chamadas
-     * de os.write e printar diversos bytes por vez.
+     * @brief Modifica um bit na janela atual.
+     * @param local_bit_idx Índice do bit relativo ao início da janela (0 até current_window_bytes * 8 - 1).
+     * @param value true para 1, false para 0.
      */
+    inline void set_bit(size_t local_bit_idx, bool value) noexcept {
+        const size_t byte_idx = local_bit_idx >> 3;
+        const uint8_t bit_pos = 7 - (local_bit_idx & 7);
+
+        if(value){
+            this->__data[byte_idx] |= static_cast<std::byte>(1 << bit_pos);
+        }
+        else{
+            this->__data[byte_idx] &= ~static_cast<std::byte>(1 << bit_pos);
+        }
+    }
+
+    /**
+     * @brief Obtém o valor de um bit na janela atual.
+     * @param local_bit_idx Índice do bit relativo ao início da janela (0 até current_window_bytes * 8 - 1).
+     */
+    inline bool get_bit(size_t local_bit_idx) const noexcept {
+        const size_t byte_idx = local_bit_idx >> 3;
+        const uint8_t bit_pos = 7 - (local_bit_idx & 7);
+
+        return std::to_integer<uint8_t>(this->__data[byte_idx] & static_cast<std::byte>(1 << bit_pos)) != 0;
+    }
+
+
+#ifdef ENABLE_BINARY_LOOKTABLE
 
     /**
      * @brief Exibe o buffer em formato binário no stream.
@@ -273,5 +293,4 @@ public:
     }
 
 #endif
-
 };
