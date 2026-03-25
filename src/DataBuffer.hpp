@@ -5,6 +5,7 @@
 #include <memory>
 #include <algorithm>
 #include <stdexcept>
+#include <bit>
 
 #ifdef ENABLE_BINARY_LOOKTABLE
 #include <array>
@@ -35,7 +36,7 @@ private:
          * @brief Tamanho máximo de uma janela em Bytes
          * @default 2 MB per window
          */
-        size_t max_window_size = 3;//1 * 1024 * 1024;
+        size_t max_window_size = 2; //1 * 1024 * 1024;
 
         /**
          * @brief Quantidade de janelas de bytes necessárias para cobrir o arquivo de forma completa.
@@ -252,52 +253,34 @@ public:
         return std::to_integer<uint8_t>(this->__data[byte_idx] & static_cast<std::byte>(1 << bit_pos)) != 0;
     }
 
-    /**
-     * @brief Salva a janela atual no arquivo "result.out".
-     * @details
-     * Esta função escreve os dados da janela atual no arquivo de saída.
-     * - Se o arquivo não existir: é criado e pré-alocado com o tamanho total.
-     * - Se o arquivo já existir: os dados são sobrescritos na posição correta.
-     * A posição de escrita é calculada com base no índice da janela atual,
-     * permitindo salvar janelas independentes sem recarregar o arquivo inteiro.
-     */
-    void save(){
+    static size_t get_hamming_distance(DataBuffer& db1, DataBuffer& db2){
+        size_t diffs = 0;
 
-        std::fstream outfile(
-            "result.out",
-            /* Caso já exista, não apagará o conteúdo anterior. */
-            std::ios::binary | std::ios::in | std::ios::out
-        );
+        const auto* ptr1 = reinterpret_cast<const uint8_t*>(db1.__data.get());
+        const auto* ptr2 = reinterpret_cast<const uint8_t*>(db2.__data.get());
+        for(
+            size_t i = 0;
+            i < db1.__tfs_bytes;
+            ++i
+        ){
 
-        if(!outfile.is_open()){
+            diffs += std::popcount(static_cast<uint8_t>(ptr1[i] ^ ptr2[i]));
 
-            // Apenas para limpar flags de erro
-            outfile.clear();
-            outfile.open(
-                "result.out",
-                std::ios::binary | std::ios::out
-            );
-
-            if(!outfile.is_open()){
-                throw std::runtime_error("Não foi possível criar o arquivo de saída.");
+            if((i + 1) == db1.__bw.current_window_bytes){
+                if(db1.__update_window()){
+                    /* Pois ao final deste, ainda será somado uma unidade. */
+                    db2.__update_window();
+                    i = -1;
+                }
+                else{
+                    return diffs;
+                }
             }
-
-            // Devemos verificar isso de alocar o armazenamento antes
-
         }
 
-        outfile.seekp(
-            (this->__bw.current_window - 1) * this->__bw.max_window_size,
-            std::ios::beg
-        );
-
-        outfile.write(
-            reinterpret_cast<const char*>(this->__data.get()),
-            this->__bw.current_window_bytes
-        );
-
-        outfile.close();
+        return diffs;
     }
+
 
 #ifdef ENABLE_BINARY_LOOKTABLE
 
@@ -337,6 +320,5 @@ public:
             }
         }
     }
-
 #endif
 };

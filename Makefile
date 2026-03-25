@@ -1,7 +1,7 @@
 all:
-	g++ -g3 -O0 -Wall -fno-inline -march=native -DENABLE_BINARY_LOOKTABLE src/debug.cpp -o src/debug; \
+	g++ -std=c++20 -g3 -O0 -Wall -fno-inline -march=native -DENABLE_BINARY_LOOKTABLE src/debug.cpp -o src/debug; \
 	gdb --args ./src/debug src/filetest.txt;
 
 real:
-	g++ -O3 -march=native src/debug.cpp -o src/main; \
-	./src/main src/filetest.txt
+	g++ -std=c++20 -O3 -march=native src/debug.cpp -o src/main; \
+	./src/main src/filetest.txt;
