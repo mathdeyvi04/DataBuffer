@@ -5,6 +5,7 @@
 #include <memory>
 #include <algorithm>
 #include <stdexcept>
+#include <filesystem>
 #include <bit>
 
 #ifdef ENABLE_BINARY_LOOKTABLE
@@ -251,6 +252,43 @@ public:
         const uint8_t bit_pos = 7 - (local_bit_idx & 7);
 
         return std::to_integer<uint8_t>(this->__data[byte_idx] & static_cast<std::byte>(1 << bit_pos)) != 0;
+    }
+
+    /**
+     * @brief Salva a janela atual para um arquivo no disco.
+     * @details Utiliza seekp para escrever os bytes exatamente na posição
+     * correspondente ao número da janela atual.
+     * @param out_filepath Caminho do arquivo de destino (será criado ou atualizado).
+     */
+    void save(const std::string& outfilepath) {
+
+        /* std::ios::in permite que o arquivo não seja apagado se já existir. */
+        std::fstream outfile(
+            outfilepath,
+            std::ios::binary | std::ios::in | std::ios::out
+        );
+
+        // Se o arquivo não existir, criamos um novo
+        if (!outfile.is_open()) {
+            outfile.clear();
+            outfile.open(outfilepath, std::ios::binary | std::ios::out);
+
+            if (!outfile.is_open()) {
+                throw std::runtime_error("Não foi possível criar o arquivo de saída.");
+            }
+
+            /* Alocar a memória suficiente para o arquivo completo */
+            std::filesystem::resize_file(outfilepath, this->__tfs_bytes);
+        }
+
+        size_t offset = (this->__bw.current_window - 1) * this->__bw.max_window_size;
+        outfile.seekp(offset, std::ios::beg);
+        outfile.write(
+            reinterpret_cast<const char*>(this->__data.get()),
+            this->__bw.current_window_bytes
+        );
+
+        outfile.close();
     }
 
     static size_t get_hamming_distance(DataBuffer& db1, DataBuffer& db2){
