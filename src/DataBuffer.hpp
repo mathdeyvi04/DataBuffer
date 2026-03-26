@@ -36,7 +36,7 @@ private:
          * @brief Tamanho máximo de uma janela em Bytes
          * @default 2 MB per window
          */
-        size_t max_window_size = 2; //1 * 1024 * 1024;
+        size_t max_window_size = 1 * 1024 * 1024;
 
         /**
          * @brief Quantidade de janelas de bytes necessárias para cobrir o arquivo de forma completa.
@@ -258,24 +258,38 @@ public:
 
         const auto* ptr1 = reinterpret_cast<const uint8_t*>(db1.__data.get());
         const auto* ptr2 = reinterpret_cast<const uint8_t*>(db2.__data.get());
-        for(
-            size_t i = 0;
-            i < db1.__tfs_bytes;
-            ++i
-        ){
 
-            diffs += std::popcount(static_cast<uint8_t>(ptr1[i] ^ ptr2[i]));
+        /* Iteraremos sobre as janelas, já não será possível somarmos byte por byte */
+        size_t current_window = 1;
+        size_t idx = 0;
+        while(current_window <= db1.__bw.window_count){
 
-            if((i + 1) == db1.__bw.current_window_bytes){
-                if(db1.__update_window()){
-                    /* Pois ao final deste, ainda será somado uma unidade. */
-                    db2.__update_window();
-                    i = -1;
-                }
-                else{
-                    return diffs;
-                }
+            /* Iteramos sobre os bytes em conjuntos de 8 */
+            for(
+                ;
+                (idx + 8) < db1.__bw.current_window_bytes;
+                idx = idx + 8
+            ){
+
+                uint64_t w1 = *reinterpret_cast<const uint64_t*>(ptr1 + idx);
+                uint64_t w2 = *reinterpret_cast<const uint64_t*>(ptr2 + idx);
+
+                diffs += std::popcount(w1 ^ w2);
             }
+
+            for(
+                ;
+                idx < db1.__bw.current_window_bytes;
+                ++idx
+            ){
+                diffs += std::popcount(static_cast<uint8_t>(ptr1[idx] ^ ptr2[idx]));
+            }
+
+            /* Garantimos que chegamos ao final da janela */
+            db1.__update_window();
+            db2.__update_window();
+            idx = 0;
+            ++current_window;
         }
 
         return diffs;
